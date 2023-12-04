@@ -17,22 +17,22 @@ use tonic::{metadata::MetadataMap, transport::Endpoint};
 #[derive(Debug, Args)]
 pub struct DQOption {
     #[arg(short = 'l', long, help = "Log filters")]
-    logfilter: Option<String>,
+    logfilter: Option<String>, // flight_sql=info
 
     #[arg(short = 'c', long, help = "Target command")]
-    command: String,
+    command: String, // statement-query
 
     #[arg(short = 's', long, help = "Target host")]
-    host: String,
+    host: String, // 127.0.0.1
 
     #[arg(short = 'p', long, help = "Target port")]
-    port: u16,
+    port: u16, // 32010
 
     #[arg(short = 't', long, help = "Target protocol")]
-    protocol: String,
+    protocol: String, // http
 
     #[arg(short = 'a', long, help = "Target authorization")]
-    authorization: Option<String>,
+    authorization: Option<String>, // "Basic YWRtaW46YWRtaW4K"
 
     #[arg(short = 'u', long, help = "Target username")]
     username: Option<String>,
@@ -44,15 +44,15 @@ pub struct DQOption {
     database: Option<String>,
 
     #[arg(short = 'q', long, help = "Target query")]
-    query: String,
+    query: String, // select date,hour,name,score from delta.default.test0
 
     #[arg(short = 'r', long, help = "Target output")]
-    output: Option<String>,
+    output: Option<String>, // pretty
 }
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> Result<()> {
-    let cmd = Command::new("FlightSQL");
+    let cmd = Command::new("FlightSQL"); // What is clap? Command line argument parser
     let cmd = DQOption::augment_args(cmd);
     let args = cmd.get_matches();
 
@@ -66,8 +66,9 @@ async fn main() -> Result<()> {
     let host = args.get_one::<String>("host").unwrap();
     let port = args.get_one::<u16>("port").unwrap();
     let protocol = args.get_one::<String>("protocol").unwrap();
-    let query = args.get_one::<String>("query").unwrap();
+    let query = args.get_one::<String>("query").unwrap().to_owned(); // should be String for later use
 
+    // Client connects the server via gRPC
     let endpoint = Endpoint::new(format!("{}://{}:{}", protocol, host, port))
         .unwrap()
         .connect_timeout(Duration::from_secs(60 * 10))
@@ -80,7 +81,15 @@ async fn main() -> Result<()> {
 
     let channel = endpoint.connect().await.unwrap();
 
+    // FlightSqlServiceClient document says that it should be created with gRPC channel
+    // which is created with tonic::transport::Endpoint.
+    // Arrow Flight is a gRPC framework for high-performance data transfer based on Apache Arrow.
+    // Arrow flight SQL is a protocol for interacting with SQL database using the Arrow in-memory format
+    // and the Flight RPC framework. That's why FlightSqlServiceClient needs gRPC channel.
     let mut client = FlightSqlServiceClient::new(channel);
+
+    // Where can I get the spec of the header?
+    // Which data should I set to the header?
     if let Some(database) = args.get_one::<String>("database") {
         client.set_header("x-flight-sql-database", database);
     }
@@ -97,10 +106,13 @@ async fn main() -> Result<()> {
         log::info!("handshake={:#?}", token);
     }
 
+    // statement-query or prepared-statement-query: Which one should I use?
+    // What is the difference between them?
+    // What is the difference between client.execute and client.prepare?
     let flight_info = match command.as_str() {
-        "statement-query" => client.execute(query.clone(), None).await.unwrap(),
+        "statement-query" => client.execute(query, None).await.unwrap(),
         "prepared-statement-query" => {
-            let mut prepared_statement = client.prepare(query.clone(), None).await.unwrap();
+            let mut prepared_statement = client.prepare(query, None).await.unwrap();
             log::info!("prepare={:#?}", prepared_statement);
             prepared_statement.execute().await.unwrap()
         }
