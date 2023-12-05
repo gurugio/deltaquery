@@ -109,6 +109,9 @@ async fn main() -> Result<()> {
     // statement-query or prepared-statement-query: Which one should I use?
     // What is the difference between them?
     // What is the difference between client.execute and client.prepare?
+
+    // client.execute() returns Struct arrow_flight::gen::FlightInfo.
+    // https://arrow.apache.org/rust/arrow_flight/gen/struct.FlightInfo.html
     let flight_info = match command.as_str() {
         "statement-query" => client.execute(query, None).await.unwrap(),
         "prepared-statement-query" => {
@@ -160,6 +163,10 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+
+///
+/// https://arrow.apache.org/docs/format/FlightSql.html#id2 shows what this function does
+///
 async fn fetch_flight_data(
     info: FlightInfo,
     authorization: Option<&String>,
@@ -168,13 +175,19 @@ async fn fetch_flight_data(
     let mut batches = Vec::with_capacity(info.endpoint.len() + 1);
     batches.push(RecordBatch::new_empty(schema));
 
-    let mut futures = FuturesOrdered::new();
+    let mut futures = FuturesOrdered::new(); // FIFO queue of futures
 
+    // What is the endpoint? How many?
+    // struct FlightEndpoint: https://arrow.apache.org/rust/arrow_flight/gen/struct.FlightEndpoint.html
+    // FlightEndpoint includes the ticket and the list of URLs.
     for endpoint in info.endpoint {
         futures.push_back(async move {
+            // BUGBUG: location is a vector of struct Location.
+            // So it should handle all Location in the vector.
             let location = endpoint.location.first().unwrap();
             let ticket = endpoint.ticket.unwrap();
 
+            // Create a gRPC channel with the information in the FlightEndpoint
             let endpoint = Endpoint::new(location.uri.clone())
                 .unwrap()
                 .connect_timeout(Duration::from_secs(60 * 10))
@@ -192,11 +205,13 @@ async fn fetch_flight_data(
                 client.set_header("authorization", authorization);
             }
 
+            // Return record batch stream reader "Struct arrow_flight::decode::FlightRecordBatchStream"
+            // with the given ticket.
             client.do_get(ticket).await
         });
     }
 
-    while let Some(result) = futures.next().await {
+    while let Some(result) = futures.next().await { // execute each future in the FIFO queue
         match result {
             Ok(mut flight_data) => {
                 let items: Vec<_> = (&mut flight_data).try_collect().await.unwrap();
