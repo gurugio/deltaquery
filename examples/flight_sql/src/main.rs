@@ -163,7 +163,6 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-
 ///
 /// https://arrow.apache.org/docs/format/FlightSql.html#id2 shows what this function does
 ///
@@ -211,9 +210,20 @@ async fn fetch_flight_data(
         });
     }
 
-    while let Some(result) = futures.next().await { // execute each future in the FIFO queue
+    // What does the next() method do? How can I find a document about it?
+    // futures is FuturesOrdered type.
+    // FuturesOrdered type implements Stream and StreamExt traits.
+    // StreamExt has next() method which Creates a future that resolves to the next item in the stream.
+    // And await keyword is used to wait for a future to complete.
+    // Therefore futures.next().await means that it waits for the next item in the stream to complete.
+    // And the return value of the next().await is a return value of client.do_get(ticket).await
+    // which is a Result<FlightRecordBatchStream, ArrowError>.
+    while let Some(result) = futures.next().await {
+        // execute each future in the FIFO queue
         match result {
             Ok(mut flight_data) => {
+                // What does the try_collect() method do? How can I find a document about it?
+                // Why (&mut) is needed?
                 let items: Vec<_> = (&mut flight_data).try_collect().await.unwrap();
 
                 log_flight_metadata(flight_data.headers(), "headers");
